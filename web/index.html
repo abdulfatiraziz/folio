@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Folio</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <button
+          id="sidebarToggle"
+          aria-label="Hide sidebar"
+          aria-expanded="true"
+          aria-controls="sidebar"
+          title="Hide sidebar (⌃⌘S)"
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true"
+          >
+            <rect
+              x="2"
+              y="3"
+              width="16"
+              height="14"
+              rx="2"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+            <path d="M7 3v14" stroke="currentColor" stroke-width="1.5" />
+          </svg></button
+        ><span class="logo">f.</span><b>Folio</b
+        ><span class="tag">A little space to read.</span>
+      </div>
+      <div class="actions">
+        <button id="open">Open file <kbd>⌘O</kbd></button
+        ><button id="reload" title="Reload file">↻</button
+        ><button id="sourceToggle">Source</button
+        ><button id="theme" title="Switch appearance">◐</button
+        ><select id="export" aria-label="Export">
+          <option value="">Export…</option>
+          <option value="pdf">PDF document</option>
+          <option value="html">HTML document</option>
+          <option value="png">PNG image</option>
+          <option value="txt">Plain text</option>
+          <option value="source">Original source</option>
+          <option value="svg">Diagram SVGs</option>
+          <option value="print">Print…</option>
+        </select>
+      </div>
+    </header>
+    <div id="tabbar">
+      <div id="tabs" role="tablist" aria-label="Open documents"></div>
+      <button
+        id="newTab"
+        aria-label="Open files in new tabs"
+        title="Open files in new tabs (⌘T)"
+      >
+        +
+      </button>
+    </div>
+    <div class="workspace">
+      <aside id="sidebar">
+        <div class="section-label">DOCUMENT</div>
+        <div id="filename">Welcome to Folio</div>
+        <div id="filetype">MARKDOWN</div>
+        <div class="section-label contents-label">ON THIS PAGE</div>
+        <nav id="outline"></nav>
+        <div class="sidebar-bottom">
+          <div id="stats"></div>
+          <div class="zoom">
+            <button id="smaller" aria-label="Decrease font size">A−</button
+            ><span id="zoomLabel">17 px</span
+            ><button id="larger" aria-label="Increase font size">A+</button>
+          </div>
+        </div>
+      </aside>
+      <main>
+        <div class="docbar">
+          <span id="breadcrumb">Your reading space</span
+          ><span id="status">Ready</span>
+        </div>
+        <div id="htmlOptions" hidden>
+          <label
+            ><input type="checkbox" id="scripts" /> Enable scripts for this HTML
+            file</label
+          ><span>Runs inside an isolated preview.</span>
+        </div>
+        <div id="panes">
+          <pre id="source" hidden></pre>
+          <div id="reader">
+            <article id="document" class="prose"></article>
+            <iframe
+              id="htmlPreview"
+              title="HTML document preview"
+              sandbox=""
+              hidden
+            ></iframe>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div id="toast" role="status"></div>
+    <input
+      type="file"
+      id="browserFile"
+      multiple
+      accept=".md,.markdown,.mdown,.mkd,.txt,.html,.htm"
+      hidden
+    />
+    <script src="bundle.js"></script>
+  </body>
+</html>
