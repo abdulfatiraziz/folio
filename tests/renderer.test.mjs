@@ -236,3 +236,120 @@ test("HTML remains visible after repeated Markdown and source-view transitions",
     );
   }
 });
+test("editing updates the preview live, marks the tab unsaved, and keeps drafts across tabs", async () => {
+  await page.evaluate(() =>
+    window.loadDocument({
+      path: "/edit/notes.md",
+      name: "notes.md",
+      kind: "md",
+      source: "# Notes\n\nFirst line.\n",
+      base: "",
+    }),
+  );
+  if (await page.locator("#source").isHidden()) await page.click("#sourceToggle");
+  await page.locator("#source").press("End");
+  await page.locator("#source").evaluate((el) => {
+    el.setSelectionRange(el.value.length, el.value.length);
+  });
+  await page.locator("#source").pressSequentially("\n## Added heading\n");
+  await page.waitForFunction(
+    () => document.querySelector("#document h2")?.textContent === "Added heading",
+  );
+  assert.ok(await page.locator("#dirty").isVisible());
+  assert.ok(await page.locator("#save").isVisible());
+  const saved = await page.evaluate(() => window.folioContent("/edit/notes.md"));
+  assert.ok(saved.dirty);
+  assert.ok(saved.content.includes("## Added heading"));
+  // Switching away and back restores the unsaved draft instead of the disk copy.
+  await page.evaluate(() =>
+    window.loadDocument({ path: "/edit/other.md", name: "other.md", kind: "md", source: "# Other\n" }),
+  );
+  assert.ok(await page.locator("#dirty").isHidden());
+  await page.evaluate(() =>
+    window.loadDocument({ path: "/edit/notes.md", name: "notes.md", kind: "md", source: "# Notes\n\nFirst line.\n" }),
+  );
+  assert.equal(await page.locator("#document h2").innerText(), "Added heading");
+  await page.evaluate(() => window.folioSaved("/edit/notes.md"));
+  assert.ok(await page.locator("#dirty").isHidden());
+});
+test("comments anchor to selected text, save into the file, survive reloads and edits, and stay out of exports", async () => {
+  await page.evaluate(() =>
+    window.loadDocument({
+      path: "/c/doc.md",
+      name: "doc.md",
+      kind: "md",
+      source: "# Title\n\nThe quick brown fox jumps.\n\nAnother fox appears.\n",
+      base: "",
+    }),
+  );
+  await page.evaluate(() => {
+    const p = [...document.querySelectorAll("#document p")][0];
+    const node = p.firstChild;
+    const start = node.data.indexOf("brown fox");
+    const range = document.createRange();
+    range.setStart(node, start);
+    range.setEnd(node, start + "brown fox".length);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.getElementById("reader").dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.locator("#commentButton").waitFor({ state: "visible" });
+  await page.click("#commentButton");
+  await page.fill("#composerText", "Is this the right animal?");
+  await page.click("#composerSave");
+  assert.equal(await page.locator("mark.comment-mark").innerText(), "brown fox");
+  assert.equal(await page.locator(".comment-card").count(), 1);
+  assert.ok(await page.locator("#comments").isVisible());
+  const { content, dirty } = await page.evaluate(() => window.folioContent());
+  assert.ok(dirty);
+  assert.ok(content.startsWith("# Title"));
+  assert.ok(content.includes("<!-- folio-comments"));
+  assert.ok(content.includes("Is this the right animal?"));
+  // The editor never shows the comment block, and exports have no highlights.
+  assert.ok(!(await page.locator("#source").inputValue()).includes("folio-comments"));
+  const exported = await page.evaluate(() => window.folioExport("html"));
+  assert.ok(!exported.html.includes("<mark"));
+  assert.ok(!exported.text.includes("folio-comments"));
+  // Reopen the saved file: the comment comes back on the same words.
+  await page.evaluate((content) => {
+    window.folioSaved("/c/doc.md");
+    return window.loadDocument({ path: "/c/doc.md", name: "doc.md", kind: "md", source: content });
+  }, content);
+  assert.equal(await page.locator("mark.comment-mark").innerText(), "brown fox");
+  assert.ok(await page.locator("#dirty").isHidden());
+  // Edits elsewhere keep the anchor; deleting the words makes it an orphan.
+  await page.locator("#source").fill("# Title\n\nIntro added.\n\nThe quick brown fox jumps.\n");
+  await page.waitForFunction(() => document.querySelector("#document p")?.textContent === "Intro added.");
+  assert.equal(await page.locator("mark.comment-mark").innerText(), "brown fox");
+  await page.locator("#source").fill("# Title\n\nThe quick red fox jumps.\n");
+  await page.waitForFunction(() => document.querySelector(".comment-card.orphan"));
+  assert.equal(await page.locator("mark.comment-mark").count(), 0);
+  await page.click(".comment-card .comment-actions button:has-text('Delete')");
+  assert.equal(await page.locator(".comment-card").count(), 0);
+  const after = await page.evaluate(() => window.folioContent().content);
+  assert.ok(!after.includes("folio-comments"));
+});
+test("comment text containing an HTML comment terminator round-trips safely", async () => {
+  const content = await page.evaluate(async () => {
+    await window.loadDocument({ path: "/c/edge.md", name: "edge.md", kind: "md", source: "Hello world.\n" });
+    const node = document.querySelector("#document p").firstChild;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, 5);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    window.folioCommand("comment");
+    document.getElementById("composerText").value = "tricky --> <script>x</script>";
+    document.getElementById("composerSave").click();
+    return window.folioContent().content;
+  });
+  assert.equal(content.match(/-->/g).length, 1);
+  await page.evaluate((content) => {
+    window.folioSaved("/c/edge.md");
+    return window.loadDocument({ path: "/c/edge.md", name: "edge.md", kind: "md", source: content });
+  }, content);
+  assert.equal(await page.locator(".comment-text").innerText(), "tricky --> <script>x</script>");
+  assert.equal(await page.locator("#commentList script").count(), 0);
+  assert.equal(await page.locator("mark.comment-mark").innerText(), "Hello");
+});

@@ -28,7 +28,9 @@ Folio opens the files you already have. Read Markdown with rendered Mermaid diag
 - **Tabs across the top.** Open several files at once, switch between them, and keep each Markdown tab's reading position. Reopening a file selects its existing tab.
 - **Your reading space.** Light and dark appearances, adjustable type, a collapsible heading sidebar, source alongside preview, and Find.
 - **HTML when you need it.** Preview complete HTML documents. Scripts start off; an opt-in switch enables them inside an isolated iframe.
-- **Read-only originals.** Folio watches the active file for changes and reloads it. Exports use a new filename and protect files open in tabs.
+- **Edit and save.** Press **Edit** (⌘U) to type in the original Markdown or HTML with a live preview. Nothing is written until you press ⌘S, and Folio asks before closing a tab or quitting with unsaved changes.
+- **Comments on your text.** Select words in the preview and click **Comment**. Comments are highlighted in the document, listed in a side panel, and saved inside the Markdown file as one hidden HTML comment block at the end, so they travel with the file and stay invisible in other Markdown viewers.
+- **Safe with your originals.** Folio watches the active file for changes and reloads it, but never overwrites unsaved edits. Exports use a new filename and protect files open in tabs.
 - **A small native host.** AppKit and the macOS WebKit engine, with no Electron runtime. The first release is approximately **4 MB installed** and **1.2 MB zipped**.
 
 <details>
@@ -60,12 +62,16 @@ Use **⌘O**, **⌘T**, or the **+** button to open files. Select multiple files
 
 | Action | Shortcut |
 | --- | --- |
+| New document | ⌘N |
 | Open file(s) | ⌘O |
 | Open file(s) in new tabs | ⌘T |
 | Close current tab | ⌘W |
 | Next / previous tab | ⌘⇧] / ⌘⇧[ |
 | Toggle sidebar | ⌃⌘S |
-| Toggle source view | ⌘U |
+| Toggle editor | ⌘U |
+| Save / Save As | ⌘S / ⌘⇧S |
+| Add comment on selected text | ⌘⌥M |
+| Show / hide comments | ⌘⇧K |
 | Switch appearance | ⌘D |
 | Find | ⌘F |
 | Reload current file | ⌘R |

@@ -40,7 +40,11 @@
       <div class="actions">
         <button id="open">Open file <kbd>⌘O</kbd></button
         ><button id="reload" title="Reload file">↻</button
-        ><button id="sourceToggle">Source</button
+        ><button id="sourceToggle" title="Edit text (⌘U)">Edit</button
+        ><button id="commentsToggle" title="Show comments (⌘⇧K)">
+          Comments<span id="commentCount"></span></button
+        ><button id="save" class="primary" title="Save (⌘S)" hidden>
+          Save <kbd>⌘S</kbd></button
         ><button id="theme" title="Switch appearance">◐</button
         ><select id="export" aria-label="Export">
           <option value="">Export…</option>
@@ -83,7 +87,10 @@
       <main>
         <div class="docbar">
           <span id="breadcrumb">Your reading space</span
-          ><span id="status">Ready</span>
+          ><span class="docstate"
+            ><span id="dirty" hidden>● Unsaved changes</span
+            ><span id="status">Ready</span></span
+          >
         </div>
         <div id="htmlOptions" hidden>
           <label
@@ -92,7 +99,12 @@
           ><span>Runs inside an isolated preview.</span>
         </div>
         <div id="panes">
-          <pre id="source" hidden></pre>
+          <textarea
+            id="source"
+            aria-label="Document text"
+            spellcheck="true"
+            hidden
+          ></textarea>
           <div id="reader">
             <article id="document" class="prose"></article>
             <iframe
@@ -102,8 +114,34 @@
               hidden
             ></iframe>
           </div>
+          <aside id="comments" aria-label="Comments" hidden>
+            <div class="comments-head">
+              <span class="section-label">COMMENTS</span
+              ><button id="commentsClose" aria-label="Hide comments">×</button>
+            </div>
+            <div id="commentList"></div>
+          </aside>
         </div>
       </main>
+    </div>
+    <button id="commentButton" hidden>
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <path
+          d="M4 4h12a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H9l-4 3v-3H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linejoin="round"
+        /></svg
+      >Comment
+    </button>
+    <div id="composer" role="dialog" aria-label="Add comment" hidden>
+      <div id="composerQuote"></div>
+      <textarea id="composerText" rows="3" placeholder="Add a comment…"></textarea>
+      <div class="composer-actions">
+        <span>⌘↩ to save</span
+        ><button id="composerCancel">Cancel</button
+        ><button id="composerSave" class="primary">Comment</button>
+      </div>
     </div>
     <div id="toast" role="status"></div>
     <input
