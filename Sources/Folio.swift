@@ -63,6 +63,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
   var findPanel: NSPanel?
   var tabSmoke = false
   var tabSmokeStage = 0
+  /// Documents with unsaved edits or comments ("" is the welcome page).
+  var dirtyPaths: Set<String> = []
+  var editAfterOpen = false
   let allowed = ["md", "markdown", "mdown", "mkd", "mdwn", "mmd", "txt", "html", "htm"]
   func applicationDidFinishLaunching(_ notification: Notification) {
     let args = CommandLine.arguments
@@ -120,9 +123,16 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
     ai.submenu = a
     menu.addItem(ai)
     let f = NSMenu(title: "File")
+    f.addItem(withTitle: "New Document…", action: #selector(newDocument), keyEquivalent: "n")
     f.addItem(withTitle: "New Tab…", action: #selector(openPanel), keyEquivalent: "t")
     f.addItem(withTitle: "Open…", action: #selector(openPanel), keyEquivalent: "o")
     f.addItem(withTitle: "Reload", action: #selector(reload), keyEquivalent: "r")
+    f.addItem(.separator())
+    f.addItem(withTitle: "Save", action: #selector(saveDocument), keyEquivalent: "s")
+    let saveAs = NSMenuItem(
+      title: "Save As…", action: #selector(saveDocumentAs), keyEquivalent: "S")
+    saveAs.keyEquivalentModifierMask = [.command, .shift]
+    f.addItem(saveAs)
     f.addItem(.separator())
     for (title, format, key) in [
       ("Export PDF…", "pdf", "e"), ("Export HTML…", "html", ""), ("Export PNG…", "png", ""),
@@ -143,24 +153,39 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
     fi.submenu = f
     menu.addItem(fi)
     let e = NSMenu(title: "Edit")
+    // Undo, Cut and Paste must exist in the menu for their shortcuts to reach
+    // the editor inside the web view.
+    e.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+    let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+    redo.keyEquivalentModifierMask = [.command, .shift]
+    e.addItem(redo)
+    e.addItem(.separator())
     for (title, action, key) in [
-      ("Copy", #selector(NSText.copy(_:)), "c"),
+      ("Cut", #selector(NSText.cut(_:)), "x"), ("Copy", #selector(NSText.copy(_:)), "c"),
+      ("Paste", #selector(NSText.paste(_:)), "v"),
       ("Select All", #selector(NSText.selectAll(_:)), "a"), ("Find…", #selector(find), "f"),
     ] { e.addItem(withTitle: title, action: action, keyEquivalent: key) }
+    e.addItem(.separator())
+    let comment = NSMenuItem(
+      title: "Add Comment", action: #selector(viewCommand(_:)), keyEquivalent: "m")
+    comment.keyEquivalentModifierMask = [.command, .option]
+    comment.representedObject = "comment"
+    e.addItem(comment)
     let ei = NSMenuItem()
     ei.submenu = e
     menu.addItem(ei)
     let v = NSMenu(title: "View")
     for (title, cmd, key) in [
       ("Next Tab", "nextTab", "]"), ("Previous Tab", "previousTab", "["),
-      ("Toggle Sidebar", "sidebar", "s"), ("Toggle Source", "source", "u"),
+      ("Toggle Sidebar", "sidebar", "s"), ("Toggle Editor", "edit", "u"),
+      ("Toggle Comments", "comments", "K"),
       ("Switch Appearance", "theme", "d"), ("Larger Text", "larger", "+"),
       ("Smaller Text", "smaller", "-"),
     ] {
       let item = NSMenuItem(title: title, action: #selector(viewCommand(_:)), keyEquivalent: key)
       item.representedObject = cmd
       if cmd == "sidebar" { item.keyEquivalentModifierMask = [.command, .control] }
-      if cmd == "nextTab" || cmd == "previousTab" {
+      if cmd == "nextTab" || cmd == "previousTab" || cmd == "comments" {
         item.keyEquivalentModifierMask = [.command, .shift]
       }
       v.addItem(item)
@@ -174,7 +199,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
     let a = NSAlert()
     a.messageText = "Folio"
     a.informativeText =
-      "A local Markdown, Mermaid & HTML reader.\nVersion 1.0 · Built for your Mac."
+      "A local Markdown, Mermaid & HTML reader and editor.\nVersion 1.1 · Built for your Mac."
     a.runModal()
   }
   @objc func openPanel() {
@@ -243,6 +268,10 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
         arguments: ["tabs": list, "active": url.path, "data": data], in: nil, in: .page
       ) { [weak self] result in
         if case .failure(let error) = result { self?.alert(error.localizedDescription) }
+        if self?.editAfterOpen == true {
+          self?.editAfterOpen = false
+          self?.web.evaluateJavaScript("window.folioCommand('editOn')", completionHandler: nil)
+        }
         if self?.smokeDir != nil { self?.runSmoke() }
       }
     } catch { alert("Could not read file: \(error.localizedDescription)") }
@@ -252,6 +281,30 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
     closeTab(current.path)
   }
   func closeTab(_ path: String) {
+    guard !busy, let url = tabs.first(where: { $0.path == path }) else { return }
+    guard dirtyPaths.contains(path) else {
+      closeTabNow(path)
+      return
+    }
+    let a = NSAlert()
+    a.messageText = "Save changes to \(url.lastPathComponent)?"
+    a.informativeText = "Your edits and comments will be lost if you don't save them."
+    a.addButton(withTitle: "Save")
+    a.addButton(withTitle: "Cancel")
+    a.addButton(withTitle: "Don't Save")
+    a.beginSheetModal(for: window) { [weak self] response in
+      guard let self else { return }
+      switch response {
+      case .alertFirstButtonReturn:
+        self.writeDraft(path, to: url) { ok in if ok { self.closeTabNow(path) } }
+      case .alertThirdButtonReturn:
+        self.discardDraft(path)
+        self.closeTabNow(path)
+      default: break
+      }
+    }
+  }
+  func closeTabNow(_ path: String) {
     guard !busy, let index = tabs.firstIndex(where: { $0.path == path }) else { return }
     let removed = tabs.remove(at: index)
     if let token = tokens.removeValue(forKey: removed.path) {
@@ -287,9 +340,157 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
   func checkFile() {
     guard ready, !busy, let current else { return }
     let date = modified(current)
-    if date != nil && date != lastModified { openFile(current) }
+    guard date != nil && date != lastModified else { return }
+    if dirtyPaths.contains(current.path) {
+      // Never replace unsaved edits behind the user's back.
+      lastModified = date
+      toast(
+        "\(current.lastPathComponent) changed on disk. Your unsaved edits are kept. Reload (⌘R) to discard them."
+      )
+      return
+    }
+    openFile(current)
   }
-  @objc func reload() { if let current { openFile(current) } }
+  @objc func reload() {
+    guard let current else { return }
+    guard dirtyPaths.contains(current.path) else {
+      openFile(current)
+      return
+    }
+    let a = NSAlert()
+    a.messageText = "Discard your changes to \(current.lastPathComponent)?"
+    a.informativeText = "Reloading shows the version saved on disk."
+    a.addButton(withTitle: "Cancel")
+    a.addButton(withTitle: "Discard and Reload")
+    a.beginSheetModal(for: window) { [weak self] response in
+      guard let self, response == .alertSecondButtonReturn else { return }
+      self.discardDraft(current.path)
+      self.openFile(current)
+    }
+  }
+
+  // MARK: Saving
+
+  func discardDraft(_ path: String) {
+    dirtyPaths.remove(path)
+    window.isDocumentEdited = !dirtyPaths.isEmpty
+    web.callAsyncJavaScript(
+      "window.folioDiscard(path)", arguments: ["path": path], in: nil, in: .page,
+      completionHandler: nil)
+  }
+  /// Writes the editor's text (and comments) for `path` to `url`.
+  func writeDraft(_ path: String, to url: URL, completion: @escaping (Bool) -> Void) {
+    web.callAsyncJavaScript(
+      "return window.folioContent(path)", arguments: ["path": path], in: nil, in: .page
+    ) { [weak self] result in
+      guard let self else { return }
+      guard case .success(let value) = result, let data = value as? [String: Any],
+        let content = data["content"] as? String
+      else {
+        self.alert("Could not read the document's text to save it.")
+        completion(false)
+        return
+      }
+      do {
+        try content.write(to: url, atomically: true, encoding: .utf8)
+      } catch {
+        self.alert("Could not save \(url.lastPathComponent): \(error.localizedDescription)")
+        completion(false)
+        return
+      }
+      if url.path == self.current?.path { self.lastModified = self.modified(url) }
+      self.dirtyPaths.remove(path)
+      self.window.isDocumentEdited = !self.dirtyPaths.isEmpty
+      self.web.callAsyncJavaScript(
+        "window.folioSaved(path)", arguments: ["path": path], in: nil, in: .page,
+        completionHandler: nil)
+      self.toast("Saved \(url.lastPathComponent)")
+      completion(true)
+    }
+  }
+  @objc func saveDocument() {
+    guard !busy else { return }
+    if let current {
+      writeDraft(current.path, to: current) { _ in }
+    } else {
+      saveDocumentAs()
+    }
+  }
+  @objc func saveDocumentAs() {
+    guard !busy else { return }
+    let old = current
+    let ext = old?.pathExtension.isEmpty == false ? old!.pathExtension : "md"
+    let p = NSSavePanel()
+    p.nameFieldStringValue =
+      old.map { "\($0.deletingPathExtension().lastPathComponent) copy.\(ext)" } ?? "Untitled.md"
+    p.allowedContentTypes = [UTType(filenameExtension: ext) ?? .plainText]
+    p.canCreateDirectories = true
+    p.beginSheetModal(for: window) { [weak self] response in
+      guard let self, response == .OK, let picked = p.url else { return }
+      let url = picked.standardizedFileURL
+      if let open = self.tabs.first(where: { $0.resolvingSymlinksInPath() == url.resolvingSymlinksInPath() }),
+        open != old
+      {
+        self.alert("\(open.lastPathComponent) is open in another tab. Close it first or choose another name.")
+        return
+      }
+      let key = old?.path ?? ""
+      self.writeDraft(key, to: url) { ok in
+        guard ok else { return }
+        let saved = url.resolvingSymlinksInPath()
+        if let old, let index = self.tabs.firstIndex(of: old), old != saved {
+          // The tab now shows the new file; the original stays as it was on disk.
+          self.tabs[index] = saved
+          if let token = self.tokens.removeValue(forKey: old.path) {
+            self.files.roots.removeValue(forKey: token)
+          }
+          let token = UUID().uuidString
+          self.tokens[saved.path] = token
+          self.files.roots[token] = saved.deletingLastPathComponent()
+          self.activateTab(saved)
+        } else if old == nil {
+          self.openFiles([saved])
+        }
+        NSDocumentController.shared.noteNewRecentDocumentURL(saved)
+      }
+    }
+  }
+  @objc func newDocument() {
+    guard !busy else { return }
+    let p = NSSavePanel()
+    p.title = "New Document"
+    p.prompt = "Create"
+    p.nameFieldStringValue = "Untitled.md"
+    p.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+    p.canCreateDirectories = true
+    p.beginSheetModal(for: window) { [weak self] response in
+      guard let self, response == .OK, let url = p.url else { return }
+      if self.tabs.contains(url.resolvingSymlinksInPath()) {
+        self.alert("That file is already open. Choose a new name.")
+        return
+      }
+      let title = url.deletingPathExtension().lastPathComponent
+      do {
+        try "# \(title)\n\n".write(to: url, atomically: true, encoding: .utf8)
+      } catch {
+        self.alert("Could not create \(url.lastPathComponent): \(error.localizedDescription)")
+        return
+      }
+      self.editAfterOpen = true
+      self.openFiles([url])
+    }
+  }
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard !dirtyPaths.isEmpty, smokeDir == nil else { return .terminateNow }
+    let a = NSAlert()
+    let count = dirtyPaths.count
+    a.messageText =
+      count == 1 ? "You have unsaved changes." : "You have unsaved changes in \(count) documents."
+    a.informativeText = "Quit anyway and lose them? Use ⌘S in each tab to save first."
+    a.addButton(withTitle: "Cancel")
+    a.addButton(withTitle: "Quit Without Saving")
+    return a.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+  }
   func application(_ sender: NSApplication, openFiles filenames: [String]) {
     openFiles(filenames.map { URL(fileURLWithPath: $0) })
     sender.reply(toOpenOrPrint: .success)
@@ -358,6 +559,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKNavi
     case "closeTab": if let path = data["id"] as? String { closeTab(path) }
     case "open": openPanel()
     case "reload": reload()
+    case "save": saveDocument()
+    case "dirty":
+      if let path = data["id"] as? String {
+        if data["dirty"] as? Bool == true { dirtyPaths.insert(path) } else { dirtyPaths.remove(path) }
+        window.isDocumentEdited = !dirtyPaths.isEmpty
+      }
     case "export": if let format = data["format"] as? String { requestExport(format) }
     case "link":
       if let text = data["url"] as? String, let url = URL(string: text),
